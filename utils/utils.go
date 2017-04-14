@@ -8,9 +8,9 @@ import (
 
 func GetFortinetURL(isHttps bool, addr, parm, sId string) (res string) {
 	if isHttps {
-		res = "https://" + addr + parm + "?" + sId
+		res = "https://" + addr + "/" + parm + "?" + sId
 	} else {
-		res = "http://" + addr + parm + "?" + sId
+		res = "http://" + addr + "/" + parm + "?" + sId
 	}
 	return
 }

@@ -1,20 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"flag"
+	"fmt"
+	"github.com/lnquy/fit/utils"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
 	"time"
-	"fmt"
-	"io/ioutil"
-	"bytes"
-	"github.com/lnquy/fit/utils"
+	"github.com/mvdan/xurls"
 )
 
 const (
-	REQ_TIMEOUT int    = 10
+	REQ_TIMEOUT int    = 15
 	HOST_TARGET string = "https://google.com"
 	F_AUTH      string = "fgtauth"
 	F_ALIVE     string = "keepalive"
@@ -34,11 +35,10 @@ var (
 )
 
 func init() {
-	fFortinetAddr = flag.String("a", "192.168.10.1:1003", "FortiGate <IP/Hostname:Port> address")
-	fIsHttps = flag.Bool("s", true, "Is FortiGate server use HTTPS protocol?")
-	fFortinetAddr = flag.String("u", "", "Your username")
-	fFortinetAddr = flag.String("p", "", "Your password")
-
+	fFortinetAddr = flag.String("a", "192.168.10.1:1003", "Fortigate <IP/Hostname:Port> address")
+	fIsHttps = flag.Bool("s", true, "Is Fortigate server use HTTPS protocol?")
+	fUsername = flag.String("u", "", "Your username")
+	fPassword = flag.String("p", "", "Your password")
 	fMaxRetries = flag.Int("r", 10, "Maximum retry times before terminating")
 
 	client = &http.Client{
@@ -52,17 +52,19 @@ func init() {
 }
 
 func main() {
+	flag.Parse()
+
 	if sId, ok := getSessionID(); ok {
-		log.Printf("Your session ID: %s\nAuthenticating...\n", sId)
+		log.Printf("Your current session ID is: %s.\nAuthenticating...\n", sId)
 		if fId := authenticate(sId); fId != "" {
-			log.Printf("Authenticated! fid: %s", fId)
+			log.Printf("Authenticated with new session ID: %s", fId)
 
 			// TODO: Keepalive
 		} else {
-			log.Println("Authentication failed!")
+			log.Println("Authentication failed. Please check your username/password. Exiting...")
 		}
 	} else {
-		log.Println("Unable to detect FortiGate's session ID. Exiting...")
+		log.Printf("Maximum retried (%v). Failed to detect Fortigate's session ID. Exiting...\n", *fMaxRetries)
 	}
 }
 
@@ -78,38 +80,58 @@ func authenticate(sId string) (fId string) {
 	req.Header.Add("content-type", "application/x-www-form-urlencoded")
 	req.Header.Add("cache-control", "no-cache")
 	if resp, err := client.Do(req); err != nil {
+		log.Printf("Error: %s", err.Error())
 		return
 	} else {
 		defer resp.Body.Close()
-		body, _ := ioutil.ReadAll(resp.Body)
-		fmt.Println("response Status:", resp.Status)
-		fmt.Println("response Headers:", resp.Header)
-		fmt.Println("response Body:", string(body))
+		if resp.StatusCode != http.StatusOK {
+			return
+		}
 
-		return "OK"
+		if body, err := ioutil.ReadAll(resp.Body); err != nil {
+			return
+		} else {
+			fmt.Println("response Body:", string(body))
+			if strings.Index(string(body), "/keepalive?") != -1 {
+				if urls := xurls.Strict.FindAllString(string(body), -1); urls != nil {
+					log.Printf("%v", urls)
+					return extractSessionIDFromUrls(urls)
+				}
+			}
+		}
 	}
 	return
 }
 
 func getSessionID() (sId string, ok bool) {
 	for i := 0; i < *fMaxRetries; i++ {
+		log.Println("Detecting your current Fortigate's session ID...")
 		resp, err := client.Get(HOST_TARGET)
 		if err != nil {
-			log.Printf("Failed to get %s. Error: %s\n", HOST_TARGET, err.Error())
+			log.Printf("Error: %s. Will retry in %v seconds...\n", err.Error(), REQ_TIMEOUT)
+			time.Sleep(time.Duration(REQ_TIMEOUT) * time.Second)
 			return
 		}
 
 		defer resp.Body.Close() // TODO: Any other solutions here?
 		log.Printf("Request successed. %#v\n", resp)
 		fUrl := resp.Request.URL.String()
-		log.Printf("Final URL: %s\n", fUrl)
 		if strings.Contains(fUrl, *fFortinetAddr) && strings.Contains(fUrl, F_AUTH) {
 			sId = fUrl[strings.Index(fUrl, "?")+1:]
 			return sId, true
 		}
 
-		log.Printf("Unable to detect FortiGate's session ID. Retrying in %v seconds...", REQ_TIMEOUT)
+		log.Printf("Unable to detect your Fortigate's session ID. Will retry in %v seconds...", REQ_TIMEOUT)
 		time.Sleep(time.Duration(REQ_TIMEOUT) * time.Second)
 	}
 	return
+}
+
+func extractSessionIDFromUrls(urls []string) string {
+	for _, u := range urls {
+		if strings.Contains(u, *fFortinetAddr) && strings.Contains(u, F_AUTH) {
+			return u[strings.Index(u, F_AUTH) + 2:]
+		}
+	}
+	return ""
 }
