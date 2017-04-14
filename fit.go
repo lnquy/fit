@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"bytes"
+	"github.com/lnquy/fit/utils"
 )
 
 const (
@@ -52,24 +53,25 @@ func init() {
 
 func main() {
 	if sId, ok := getSessionID(); ok {
-		log.Printf("Your session ID: %s\nAuthneticateing...\n", sId)
-		log.Println(authenticate(sId))
+		log.Printf("Your session ID: %s\nAuthenticating...\n", sId)
+		if fId := authenticate(sId); fId != "" {
+			log.Printf("Authenticated! fid: %s", fId)
+
+			// TODO: Keepalive
+		} else {
+			log.Println("Authentication failed!")
+		}
 	} else {
 		log.Println("Unable to detect FortiGate's session ID. Exiting...")
 	}
 }
 
 func authenticate(sId string) (fId string) {
-	var authUrl string
-	if *fIsHttps {
-		authUrl = "https://" + *fFortinetAddr + F_AUTH + "?" + sId
-	} else {
-		authUrl = "http://" + *fFortinetAddr + F_AUTH + "?" + sId
-	}
-
 	var req *http.Request
 	var err error
-	if req, err = http.NewRequest("POST", authUrl, bytes.NewBuffer([]byte(getAuthPostReqData(sId)))); err != nil {
+	authUrl := utils.GetFortinetURL(*fIsHttps, *fFortinetAddr, F_AUTH, sId)
+	authData := utils.GetAuthPostReqData(sId, *fUsername, *fPassword)
+	if req, err = http.NewRequest("POST", authUrl, bytes.NewBuffer([]byte(authData))); err != nil {
 		return
 	}
 
@@ -87,14 +89,6 @@ func authenticate(sId string) (fId string) {
 		return "OK"
 	}
 	return
-}
-
-func getAuthPostReqData(sId string) (string) {
-	return fmt.Sprintf("magic=%s&username=%s&password=%s",
-		sId,
-		escapeUrl(*fUsername),
-		escapeUrl(*fPassword),
-	)
 }
 
 func getSessionID() (sId string, ok bool) {
