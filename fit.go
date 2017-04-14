@@ -5,16 +5,19 @@ import (
 	"flag"
 	"log"
 	"net/http"
-	"time"
 	"strings"
+	"time"
+	"fmt"
+	"io/ioutil"
+	"bytes"
 )
 
 const (
 	REQ_TIMEOUT int    = 10
 	HOST_TARGET string = "https://google.com"
-	F_AUTH string = "fgtauth"
-	F_ALIVE string = "keepalive"
-	F_LOGOUT string = "logout"
+	F_AUTH      string = "fgtauth"
+	F_ALIVE     string = "keepalive"
+	F_LOGOUT    string = "logout"
 )
 
 var (
@@ -49,10 +52,49 @@ func init() {
 
 func main() {
 	if sId, ok := getSessionID(); ok {
-		log.Printf("Your session ID: %s\n", sId)
+		log.Printf("Your session ID: %s\nAuthneticateing...\n", sId)
+		log.Println(authenticate(sId))
 	} else {
 		log.Println("Unable to detect FortiGate's session ID. Exiting...")
 	}
+}
+
+func authenticate(sId string) (fId string) {
+	var authUrl string
+	if *fIsHttps {
+		authUrl = "https://" + *fFortinetAddr + F_AUTH + "?" + sId
+	} else {
+		authUrl = "http://" + *fFortinetAddr + F_AUTH + "?" + sId
+	}
+
+	var req *http.Request
+	var err error
+	if req, err = http.NewRequest("POST", authUrl, bytes.NewBuffer([]byte(getAuthPostReqData(sId)))); err != nil {
+		return
+	}
+
+	req.Header.Add("content-type", "application/x-www-form-urlencoded")
+	req.Header.Add("cache-control", "no-cache")
+	if resp, err := client.Do(req); err != nil {
+		return
+	} else {
+		defer resp.Body.Close()
+		body, _ := ioutil.ReadAll(resp.Body)
+		fmt.Println("response Status:", resp.Status)
+		fmt.Println("response Headers:", resp.Header)
+		fmt.Println("response Body:", string(body))
+
+		return "OK"
+	}
+	return
+}
+
+func getAuthPostReqData(sId string) (string) {
+	return fmt.Sprintf("magic=%s&username=%s&password=%s",
+		sId,
+		escapeUrl(*fUsername),
+		escapeUrl(*fPassword),
+	)
 }
 
 func getSessionID() (sId string, ok bool) {
@@ -63,11 +105,12 @@ func getSessionID() (sId string, ok bool) {
 			return
 		}
 
-		log.Printf("Success. %#v\n", resp)
+		defer resp.Body.Close() // TODO: Any other solutions here?
+		log.Printf("Request successed. %#v\n", resp)
 		fUrl := resp.Request.URL.String()
 		log.Printf("Final URL: %s\n", fUrl)
 		if strings.Contains(fUrl, *fFortinetAddr) && strings.Contains(fUrl, F_AUTH) {
-			sId = fUrl[strings.Index(fUrl, "?") + 1 : ]
+			sId = fUrl[strings.Index(fUrl, "?")+1:]
 			return sId, true
 		}
 
