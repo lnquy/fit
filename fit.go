@@ -6,12 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"github.com/lnquy/fit/utils"
+	"github.com/mvdan/xurls"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
 	"time"
-	"github.com/mvdan/xurls"
 )
 
 const (
@@ -30,8 +30,9 @@ var (
 	fPassword     *string
 	fMaxRetries   *int
 
-	client    *http.Client
-	sessionId string
+	client *http.Client
+	ticker *time.Ticker
+	sId    string // Current session ID
 )
 
 func init() {
@@ -54,10 +55,11 @@ func init() {
 func main() {
 	flag.Parse()
 
-	if sId, ok := getSessionID(); ok {
+	var ok bool
+	if sId, ok = getSessionID(); ok {
 		log.Printf("Your current session ID is: %s.\nAuthenticating...\n", sId)
-		if fId := authenticate(sId); fId != "" {
-			log.Printf("Authenticated with new session ID: %s", fId)
+		if sId = authenticate(sId); sId != "" {
+			log.Printf("Authenticated with new session ID: %s", sId)
 
 			// TODO: Keepalive
 		} else {
@@ -92,6 +94,7 @@ func authenticate(sId string) (fId string) {
 			return
 		} else {
 			fmt.Println("response Body:", string(body))
+			// TODO: Get timeout
 			if strings.Index(string(body), "/keepalive?") != -1 {
 				if urls := xurls.Strict.FindAllString(string(body), -1); urls != nil {
 					log.Printf("%v", urls)
@@ -130,8 +133,18 @@ func getSessionID() (sId string, ok bool) {
 func extractSessionIDFromUrls(urls []string) string {
 	for _, u := range urls {
 		if strings.Contains(u, *fFortinetAddr) && strings.Contains(u, F_AUTH) {
-			return u[strings.Index(u, F_AUTH) + 2:]
+			return u[strings.Index(u, F_AUTH)+2:]
 		}
 	}
 	return ""
+}
+
+func keepalive() {
+	ticker = time.NewTicker(time.Millisecond * 500) // TODO: Ticker by timeout
+	go func() {
+		for t := range ticker.C {
+			fmt.Println("Tick at", t)
+			// TODO: keepalive worker
+		}
+	}()
 }
