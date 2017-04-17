@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	REFRESH_TIME int = 18000 // Seconds
 	REQ_TIMEOUT int    = 15
 	HOST_TARGET string = "https://google.com"
 	F_AUTH      string = "fgtauth"
@@ -140,7 +141,7 @@ func extractSessionIDFromUrls(urls []string) string {
 }
 
 func keepalive() {
-	ticker = time.NewTicker(time.Millisecond * 500) // TODO: Ticker by timeout
+	ticker = time.NewTicker(time.Second * time.Duration(REFRESH_TIME)) // TODO: Ticker by timeout
 	go func() {
 		for t := range ticker.C {
 			fmt.Println("Tick at", t)
