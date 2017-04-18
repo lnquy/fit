@@ -33,6 +33,7 @@ var (
 
 	client *http.Client
 	ticker *time.Ticker
+	exit   chan bool
 	sId    string // Current session ID
 )
 
@@ -51,6 +52,8 @@ func init() {
 			},
 		},
 	}
+
+	exit = make(chan bool)
 }
 
 func main() {
@@ -59,10 +62,12 @@ func main() {
 	var ok bool
 	if sId, ok = getSessionID(); ok {
 		log.Printf("Your current session ID is: %s.\nAuthenticating...\n", sId)
+		// TODO: Retry if login failed
 		if sId = authenticate(sId); sId != "" {
 			log.Printf("Authenticated with new session ID: %s", sId)
-
-			// TODO: Keepalive
+			keepalive()
+			<-exit
+			log.Println("Terminated. Exiting...")
 		} else {
 			log.Println("Authentication failed. Please check your username/password. Exiting...")
 		}
@@ -133,8 +138,8 @@ func getSessionID() (sId string, ok bool) {
 
 func extractSessionIDFromUrls(urls []string) string {
 	for _, u := range urls {
-		if strings.Contains(u, *fFortinetAddr) && strings.Contains(u, F_AUTH) {
-			return u[strings.Index(u, F_AUTH)+2:]
+		if strings.Contains(u, *fFortinetAddr) && strings.Contains(u, F_ALIVE) {
+			return u[strings.Index(u, F_ALIVE)+10:]
 		}
 	}
 	return ""
@@ -144,8 +149,15 @@ func keepalive() {
 	ticker = time.NewTicker(time.Second * time.Duration(REFRESH_TIME)) // TODO: Ticker by timeout
 	go func() {
 		for t := range ticker.C {
-			fmt.Println("Tick at", t)
-			// TODO: keepalive worker
+			log.Printf("Keepalive at %s", t)
+			if resp, err := client.Get(utils.GetFortinetURL(*fIsHttps, *fFortinetAddr, F_ALIVE, sId)); err != nil || resp.StatusCode != 200 {
+				log.Printf("Keep alive failed. Error: %s", err)
+				ticker.Stop()
+				exit <- true
+				return
+			} else {
+				log.Printf("Keep alive successed. Next check after %d seconds", REFRESH_TIME)
+			}
 		}
 	}()
 }
