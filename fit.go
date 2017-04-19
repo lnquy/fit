@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"github.com/lnquy/fit/utils"
 	"github.com/mvdan/xurls"
 	"io/ioutil"
@@ -12,10 +11,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"os"
 )
 
 const (
-	REFRESH_TIME int = 18000 // Seconds
 	REQ_TIMEOUT int    = 15
 	HOST_TARGET string = "https://google.com"
 	F_AUTH      string = "fgtauth"
@@ -30,6 +29,7 @@ var (
 	fUsername     *string
 	fPassword     *string
 	fMaxRetries   *int
+	fRefreshTime *int
 
 	client *http.Client
 	ticker *time.Ticker
@@ -38,11 +38,19 @@ var (
 )
 
 func init() {
+	f, err := os.OpenFile("fit.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("Error opening log file: %v", err)
+	}
+	defer f.Close()
+	log.SetOutput(f)
+
 	fFortinetAddr = flag.String("a", "192.168.10.1:1003", "Fortigate <IP/Hostname:Port> address")
 	fIsHttps = flag.Bool("s", true, "Is Fortigate server use HTTPS protocol?")
 	fUsername = flag.String("u", "", "Your username")
 	fPassword = flag.String("p", "", "Your password")
-	fMaxRetries = flag.Int("r", 10, "Maximum retry times before terminating")
+	fMaxRetries = flag.Int("n", 10, "Maximum retry times before terminating")
+	fRefreshTime = flag.Int("r", 18000, "Time to wait until check and refresh Fortigate session in second")
 
 	client = &http.Client{
 		Timeout: time.Duration(REQ_TIMEOUT) * time.Second,
@@ -61,26 +69,37 @@ func main() {
 
 	var ok bool
 	if sId, ok = getSessionID(); ok {
-		log.Printf("Your current session ID is: %s.\nAuthenticating...\n", sId)
-		// TODO: Retry if login failed
+		log.Printf("Current session ID: %s.\nAuthenticating...\n", sId)
 		if sId = authenticate(sId); sId != "" {
-			log.Printf("Authenticated with new session ID: %s", sId)
-			keepalive()
+			log.Printf("Authenticated. Current session ID: %s", sId)
+			keepAlive()
 			<-exit
 			log.Println("Terminated. Exiting...")
 		} else {
-			log.Println("Authentication failed. Please check your username/password. Exiting...")
+			log.Printf("Maximum retried (%v). Please check your username/password. Exiting...", *fMaxRetries)
 		}
 	} else {
-		log.Printf("Maximum retried (%v). Failed to detect Fortigate's session ID. Exiting...\n", *fMaxRetries)
+		log.Printf("Maximum retried (%v). Failed to detect Fortigate's session ID. Exiting...", *fMaxRetries)
 	}
+	log.Println("Have a good day. Bye mate!")
 }
 
-func authenticate(sId string) (fId string) {
+func authenticate(id string) (aId string) {
+	for i := 0; i < *fMaxRetries; i++ {
+		if aId = authenticateRequest(id); aId != "" {
+			return
+		}
+		log.Printf("Authenticate failed. Retrying in %v seconds...", REQ_TIMEOUT)
+		time.Sleep(time.Second * time.Duration(REQ_TIMEOUT))
+	}
+	return
+}
+
+func authenticateRequest(id string) (res string) {
 	var req *http.Request
 	var err error
-	authUrl := utils.GetFortinetURL(*fIsHttps, *fFortinetAddr, F_AUTH, sId)
-	authData := utils.GetAuthPostReqData(sId, *fUsername, *fPassword)
+	authUrl := utils.GetFortinetURL(*fIsHttps, *fFortinetAddr, F_AUTH, id)
+	authData := utils.GetAuthPostReqData(id, *fUsername, *fPassword)
 	if req, err = http.NewRequest("POST", authUrl, bytes.NewBuffer([]byte(authData))); err != nil {
 		return
 	}
@@ -99,11 +118,10 @@ func authenticate(sId string) (fId string) {
 		if body, err := ioutil.ReadAll(resp.Body); err != nil {
 			return
 		} else {
-			fmt.Println("response Body:", string(body))
-			// TODO: Get timeout
+			log.Println("response Body:", string(body))
 			if strings.Index(string(body), "/keepalive?") != -1 {
 				if urls := xurls.Strict.FindAllString(string(body), -1); urls != nil {
-					log.Printf("%v", urls)
+					//log.Printf("%v", urls)
 					return extractSessionIDFromUrls(urls)
 				}
 			}
@@ -117,20 +135,20 @@ func getSessionID() (sId string, ok bool) {
 		log.Println("Detecting your current Fortigate's session ID...")
 		resp, err := client.Get(HOST_TARGET)
 		if err != nil {
-			log.Printf("Error: %s. Will retry in %v seconds...\n", err.Error(), REQ_TIMEOUT)
+			log.Printf("Error: %s. Retrying in %v seconds...\n", err.Error(), REQ_TIMEOUT)
 			time.Sleep(time.Duration(REQ_TIMEOUT) * time.Second)
 			return
 		}
 
-		defer resp.Body.Close() // TODO: Any other solutions here?
-		log.Printf("Request successed. %#v\n", resp)
+		defer resp.Body.Close()
+		//log.Printf("Request successed. %#v\n", resp)
 		fUrl := resp.Request.URL.String()
 		if strings.Contains(fUrl, *fFortinetAddr) && strings.Contains(fUrl, F_AUTH) {
 			sId = fUrl[strings.Index(fUrl, "?")+1:]
 			return sId, true
 		}
 
-		log.Printf("Unable to detect your Fortigate's session ID. Will retry in %v seconds...", REQ_TIMEOUT)
+		log.Printf("Detect Fortigate session ID failed. Retrying in %v seconds...", REQ_TIMEOUT)
 		time.Sleep(time.Duration(REQ_TIMEOUT) * time.Second)
 	}
 	return
@@ -145,19 +163,25 @@ func extractSessionIDFromUrls(urls []string) string {
 	return ""
 }
 
-func keepalive() {
-	ticker = time.NewTicker(time.Second * time.Duration(REFRESH_TIME)) // TODO: Ticker by timeout
+func keepAlive() {
+	ticker = time.NewTicker(time.Second * time.Duration(*fRefreshTime))
 	go func() {
 		for t := range ticker.C {
 			log.Printf("Keepalive at %s", t)
 			if resp, err := client.Get(utils.GetFortinetURL(*fIsHttps, *fFortinetAddr, F_ALIVE, sId)); err != nil || resp.StatusCode != 200 {
 				log.Printf("Keep alive failed. Error: %s", err)
+				// TODO: Keep alive retries, if failed -> Logout, re-auth
 				ticker.Stop()
 				exit <- true
 				return
 			} else {
-				log.Printf("Keep alive successed. Next check after %d seconds", REFRESH_TIME)
+				log.Printf("Keep alive successed. Next check after %d seconds", *fRefreshTime)
 			}
 		}
 	}()
+}
+
+func logout() (err error) {
+	_, err = client.Get(utils.GetFortinetURL(*fIsHttps, *fFortinetAddr, F_LOGOUT, sId))
+	return
 }
