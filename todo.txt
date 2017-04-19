@@ -1,0 +1,29 @@
+TODOS
+=====
+
+1. Retry when failing keep alive. 
+	- If cannot keep alive -> Logout and reauthenticate.
+2. Add option to read specific configuration file [?]
+3. Script to allow start as background process + auto start up
+
+
+mklink "%userprofile%\Start Menu\Programs\Startup\fit.lnk" "D:\Wokspace\Golang\src\github.com\lnquy\fit\build\fit.exe"
+
+
+https://github.com/go-ole/go-ole
+
+ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED|ole.COINIT_SPEED_OVER_MEMORY)
+oleShellObject, err := oleutil.CreateObject("WScript.Shell")
+if err != nil {
+    return err
+}
+defer oleShellObject.Release()
+wshell, err := oleShellObject.QueryInterface(ole.IID_IDispatch)
+if err != nil {
+    return err
+}
+defer wshell.Release()
+cs, err := oleutil.CallMethod(wshell, "CreateShortcut", dst)
+idispatch := cs.ToIDispatch()
+oleutil.PutProperty(idispatch, "TargetPath", src)
+oleutil.CallMethod(idispatch, "Save")
