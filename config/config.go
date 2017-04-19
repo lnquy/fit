@@ -33,7 +33,7 @@ func ReadFromFile() (err error) {
 	if file, err = os.Open("conf.json"); err != nil {
 		log.Printf("Open configuration file failed. Error: %s", err)
 	} else {
-		if err := json.NewDecoder(file).Decode(&F); err != nil {
+		if err := json.NewDecoder(file).Decode(&Fit); err != nil {
 			log.Printf("Decode configuration file failed. Error: %s", err)
 		}
 	}
