@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"github.com/lnquy/fit/utils"
+	c "github.com/lnquy/fit/config"
 	"github.com/mvdan/xurls"
 	"io/ioutil"
 	"log"
@@ -38,6 +39,7 @@ var (
 )
 
 func init() {
+	// Write log to file instead of stdout
 	f, err := os.OpenFile("fit.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
@@ -45,7 +47,7 @@ func init() {
 	defer f.Close()
 	log.SetOutput(f)
 
-	fFortinetAddr = flag.String("a", "192.168.10.1:1003", "Fortigate <IP/Hostname:Port> address")
+	fFortinetAddr = flag.String("a", "", "Fortigate <IP/Hostname:Port> address")
 	fIsHttps = flag.Bool("s", true, "Is Fortigate server use HTTPS protocol?")
 	fUsername = flag.String("u", "", "Your username")
 	fPassword = flag.String("p", "", "Your password")
@@ -65,7 +67,7 @@ func init() {
 }
 
 func main() {
-	flag.Parse()
+	configure()
 
 	var ok bool
 	if sId, ok = getSessionID(); ok {
@@ -76,16 +78,16 @@ func main() {
 			<-exit
 			log.Println("Terminated. Exiting...")
 		} else {
-			log.Printf("Maximum retried (%v). Please check your username/password. Exiting...", *fMaxRetries)
+			log.Printf("Maximum retried (%v). Please check your username/password. Exiting...", c.Fit.MaxRetries)
 		}
 	} else {
-		log.Printf("Maximum retried (%v). Failed to detect Fortigate's session ID. Exiting...", *fMaxRetries)
+		log.Printf("Maximum retried (%v). Failed to detect Fortigate's session ID. Exiting...", c.Fit.MaxRetries)
 	}
 	log.Println("Have a good day. Bye mate!")
 }
 
 func authenticate(id string) (aId string) {
-	for i := 0; i < *fMaxRetries; i++ {
+	for i := 0; i < c.Fit.MaxRetries; i++ {
 		if aId = authenticateRequest(id); aId != "" {
 			return
 		}
@@ -98,8 +100,8 @@ func authenticate(id string) (aId string) {
 func authenticateRequest(id string) (res string) {
 	var req *http.Request
 	var err error
-	authUrl := utils.GetFortinetURL(*fIsHttps, *fFortinetAddr, F_AUTH, id)
-	authData := utils.GetAuthPostReqData(id, *fUsername, *fPassword)
+	authUrl := utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_AUTH, id)
+	authData := utils.GetAuthPostReqData(id, c.Fit.Username, c.Fit.Password)
 	if req, err = http.NewRequest("POST", authUrl, bytes.NewBuffer([]byte(authData))); err != nil {
 		return
 	}
@@ -131,8 +133,8 @@ func authenticateRequest(id string) (res string) {
 }
 
 func getSessionID() (sId string, ok bool) {
-	for i := 0; i < *fMaxRetries; i++ {
-		log.Println("Detecting your current Fortigate's session ID...")
+	for i := 0; i < c.Fit.MaxRetries; i++ {
+		log.Println("Detecting your current Fortigate session ID...")
 		resp, err := client.Get(HOST_TARGET)
 		if err != nil {
 			log.Printf("Error: %s. Retrying in %v seconds...\n", err.Error(), REQ_TIMEOUT)
@@ -143,7 +145,7 @@ func getSessionID() (sId string, ok bool) {
 		defer resp.Body.Close()
 		//log.Printf("Request successed. %#v\n", resp)
 		fUrl := resp.Request.URL.String()
-		if strings.Contains(fUrl, *fFortinetAddr) && strings.Contains(fUrl, F_AUTH) {
+		if strings.Contains(fUrl, c.Fit.Address) && strings.Contains(fUrl, F_AUTH) {
 			sId = fUrl[strings.Index(fUrl, "?")+1:]
 			return sId, true
 		}
@@ -156,7 +158,7 @@ func getSessionID() (sId string, ok bool) {
 
 func extractSessionIDFromUrls(urls []string) string {
 	for _, u := range urls {
-		if strings.Contains(u, *fFortinetAddr) && strings.Contains(u, F_ALIVE) {
+		if strings.Contains(u, c.Fit.Address) && strings.Contains(u, F_ALIVE) {
 			return u[strings.Index(u, F_ALIVE)+10:]
 		}
 	}
@@ -164,24 +166,53 @@ func extractSessionIDFromUrls(urls []string) string {
 }
 
 func keepAlive() {
-	ticker = time.NewTicker(time.Second * time.Duration(*fRefreshTime))
+	ticker = time.NewTicker(time.Second * time.Duration(c.Fit.RefreshTime))
 	go func() {
 		for t := range ticker.C {
 			log.Printf("Keepalive at %s", t)
-			if resp, err := client.Get(utils.GetFortinetURL(*fIsHttps, *fFortinetAddr, F_ALIVE, sId)); err != nil || resp.StatusCode != 200 {
+			if resp, err := client.Get(utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_ALIVE, sId)); err != nil || resp.StatusCode != 200 {
 				log.Printf("Keep alive failed. Error: %s", err)
 				// TODO: Keep alive retries, if failed -> Logout, re-auth
 				ticker.Stop()
 				exit <- true
 				return
 			} else {
-				log.Printf("Keep alive successed. Next check after %d seconds", *fRefreshTime)
+				log.Printf("Keep alive successed (%s). Next check after %d seconds", sId, c.Fit.RefreshTime)
 			}
 		}
 	}()
 }
 
 func logout() (err error) {
-	_, err = client.Get(utils.GetFortinetURL(*fIsHttps, *fFortinetAddr, F_LOGOUT, sId))
+	_, err = client.Get(utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_LOGOUT, sId))
 	return
+}
+
+func configure() {
+	c.ReadFromFile()
+
+	// Override config by CLI args
+	flag.Parse()
+	if *fFortinetAddr != "" {
+		c.Fit.Address = *fFortinetAddr
+	}
+	if !*fIsHttps {
+		c.Fit.IsHTTPS = *fIsHttps
+	}
+	if *fUsername != "" {
+		c.Fit.Username = *fUsername
+	}
+	if *fPassword != "" {
+		c.Fit.Password = *fPassword
+	}
+	if *fMaxRetries != 10 {
+		c.Fit.MaxRetries = *fMaxRetries
+	}
+	if *fRefreshTime != 18000 {
+		c.Fit.RefreshTime = *fRefreshTime
+	}
+
+	if c.Fit.Address == "" || c.Fit.Username == "" || c.Fit.Password == "" {
+		log.Fatalln("Fortinet server address, username and password must be specified via configuration file or CLI arguments. Exiting...")
+	}
 }
