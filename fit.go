@@ -4,16 +4,15 @@ import (
 	"bytes"
 	"crypto/tls"
 	"flag"
-	"github.com/lnquy/fit/utils"
 	c "github.com/lnquy/fit/config"
+	"github.com/lnquy/fit/utils"
 	"github.com/mvdan/xurls"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
-	"os"
-	"io"
 )
 
 const (
@@ -31,24 +30,26 @@ var (
 	fUsername     *string
 	fPassword     *string
 	fMaxRetries   *int
-	fRefreshTime *int
+	fRefreshTime  *int
 
-	client *http.Client
-	ticker *time.Ticker
+	sId string // Current session ID
+
+	client  *http.Client
+	ticker  *time.Ticker
 	logFile *os.File
-	exit   chan bool
-	sId    string // Current session ID
+	//mw      io.Writer
+	exit    chan bool
 )
 
 func init() {
 	// Write log to file and stdout
 	var err error
-	logFile, err = os.OpenFile("fit.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+	logFile, err = os.OpenFile("fit.log", os.O_RDWR|os.O_CREATE, 0666) // |os.O_APPEND
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
 	}
-	mw := io.MultiWriter(os.Stdout, logFile)
-	log.SetOutput(mw)
+	//mw = io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(logFile)
 
 	fFortinetAddr = flag.String("a", "", "Fortigate <IP/Hostname:Port> address")
 	fIsHttps = flag.Bool("s", true, "Is Fortigate server use HTTPS protocol?")
@@ -78,6 +79,7 @@ func main() {
 		log.Printf("Current session ID: %s. Authenticating...\n", sId)
 		if sId = authenticate(sId); sId != "" {
 			log.Printf("Authenticated. Current session ID: %s", sId)
+			log.Printf("Welcome to Internet. Your session will be refreshed automatically in %d seconds", c.Fit.RefreshTime)
 			keepAlive()
 			<-exit
 			log.Println("Terminated. Exiting...")

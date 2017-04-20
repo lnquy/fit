@@ -24,7 +24,7 @@ func init() {
 		Username: "",
 		Password: "",
 		MaxRetries: 10,
-		RefreshTime: 1800,
+		RefreshTime: 18000,
 	}
 }
 
