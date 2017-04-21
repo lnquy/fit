@@ -76,10 +76,11 @@ func main() {
 
 	var ok bool
 	if sId, ok = getSessionID(); ok {
-		log.Printf("Current session ID: %s. Authenticating...\n", sId)
+		log.Printf("Detected session ID: %s", sId)
+		log.Println("Authenticating...")
 		if sId = authenticate(sId); sId != "" {
 			log.Printf("Authenticated. Current session ID: %s", sId)
-			log.Printf("Welcome to Internet. Your session will be refreshed automatically in %d seconds", c.Fit.RefreshTime)
+			log.Printf("Welcome to the Internet. Your session will be refreshed automatically in %d seconds", c.Fit.RefreshTime)
 			keepAlive()
 			<-exit
 			log.Println("Terminated. Exiting...")
