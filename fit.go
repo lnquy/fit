@@ -31,6 +31,7 @@ var (
 	fPassword     *string
 	fMaxRetries   *int
 	fRefreshTime  *int
+	fStartup      *bool
 
 	sId string // Current session ID
 
@@ -38,7 +39,7 @@ var (
 	ticker  *time.Ticker
 	logFile *os.File
 	//mw      io.Writer
-	exit    chan bool
+	exit chan bool
 )
 
 func init() {
@@ -52,11 +53,12 @@ func init() {
 	log.SetOutput(logFile)
 
 	fFortinetAddr = flag.String("a", "", "Fortigate <IP/Hostname:Port> address")
-	fIsHttps = flag.Bool("s", true, "Is Fortigate server use HTTPS protocol?")
+	fIsHttps = flag.Bool("h", true, "Is Fortigate server use HTTPS protocol?")
 	fUsername = flag.String("u", "", "Your username")
 	fPassword = flag.String("p", "", "Your password")
 	fMaxRetries = flag.Int("n", 10, "Maximum retry times before terminating")
 	fRefreshTime = flag.Int("r", 18000, "Time to wait until check and refresh Fortigate session in second")
+	fStartup = flag.Bool("s", false, "Allow F.IT automatically run when your computer started up?")
 
 	client = &http.Client{
 		Timeout: time.Duration(REQ_TIMEOUT) * time.Second,
@@ -177,14 +179,23 @@ func keepAlive() {
 	go func() {
 		for t := range ticker.C {
 			log.Printf("Keepalive at %s", t)
-			if resp, err := client.Get(utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_ALIVE, sId)); err != nil || resp.StatusCode != 200 {
-				log.Printf("Keep alive failed. Error: %s", err)
-				// TODO: Keep alive retries, if failed -> Logout, re-auth
+			var ok bool
+			for i := 0; i < c.Fit.MaxRetries; i++ {
+				if resp, err := client.Get(utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_ALIVE, sId)); err != nil || resp.StatusCode != 200 {
+					log.Printf("Keep alive failed. Retrying in %v seconds...", REQ_TIMEOUT)
+					time.Sleep(time.Second * time.Duration(REQ_TIMEOUT))
+				} else {
+					log.Printf("Keep alive successed (%s). Next check after %d seconds", sId, c.Fit.RefreshTime)
+					ok = true
+					break
+				}
+			}
+
+			if !ok {
+				// TODO: Trying to logout and re-authenticate
+				log.Println("Cannot refresh your session. Please check and try again!")
 				ticker.Stop()
 				exit <- true
-				return
-			} else {
-				log.Printf("Keep alive successed (%s). Next check after %d seconds", sId, c.Fit.RefreshTime)
 			}
 		}
 	}()
@@ -223,5 +234,15 @@ func configure() {
 		log.Print("Fortinet server address, username and password must be specified via configuration file or CLI arguments. Exiting...")
 		flag.PrintDefaults()
 		os.Exit(1)
+	}
+
+	if *fStartup {
+		c.Fit.AutoStartup = *fStartup
+		// Startup
+		if err := utils.SetStartupShortcut(); err != nil {
+			log.Printf("Cannot set startup shprtcut for F.IT program on your computer. Error: %s", err)
+		} else {
+			log.Println("F.IT will automatically start up with your computer!")
+		}
 	}
 }

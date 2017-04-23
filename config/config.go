@@ -13,6 +13,8 @@ type FitConfig struct {
 	Password string
 	MaxRetries int
 	RefreshTime int
+
+	AutoStartup bool
 }
 
 var Fit *FitConfig // Configuration singleton
@@ -30,7 +32,7 @@ func init() {
 
 func ReadFromFile() (err error) {
 	var file *os.File
-	if file, err = os.Open("conf.json"); err != nil {
+	if file, err = os.Open("faith.conf"); err != nil {
 		log.Printf("Open configuration file failed. Error: %s", err)
 	} else {
 		if err := json.NewDecoder(file).Decode(&Fit); err != nil {
