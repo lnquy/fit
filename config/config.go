@@ -7,14 +7,14 @@ import (
 )
 
 type FitConfig struct {
-	IsHTTPS bool
-	Address string
-	Username string
-	Password string
-	MaxRetries int
-	RefreshTime int
+	IsHTTPS bool `json:"is_https"`
+	Address string `json:"fortinet_address"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	MaxRetries int `json:"max_retries"`
+	RefreshTime int `json:"refresh_time"`
 
-	AutoStartup bool
+	AutoStartup bool `json:"auto_startup"`
 }
 
 var Fit *FitConfig // Configuration singleton
@@ -32,7 +32,7 @@ func init() {
 
 func ReadFromFile() (err error) {
 	var file *os.File
-	if file, err = os.Open("faith.conf"); err != nil {
+	if file, err = os.Open("fit.conf"); err != nil {
 		log.Printf("Open configuration file failed. Error: %s", err)
 	} else {
 		if err := json.NewDecoder(file).Decode(&Fit); err != nil {

@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"path"
 )
 
 const (
@@ -45,6 +46,11 @@ var (
 func init() {
 	// Write log to file and stdout
 	var err error
+	logPath, _ := os.Getwd()
+	logPath = path.Join(logPath, "fit.log")
+	if _, err = os.Stat(logPath); !os.IsNotExist(err) {
+		os.Remove(logPath)
+	}
 	logFile, err = os.OpenFile("fit.log", os.O_RDWR|os.O_CREATE, 0666) // |os.O_APPEND
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
@@ -178,7 +184,7 @@ func keepAlive() {
 	ticker = time.NewTicker(time.Second * time.Duration(c.Fit.RefreshTime))
 	go func() {
 		for t := range ticker.C {
-			log.Printf("Keepalive at %s", t)
+			log.Printf("Keep alive at %s", t)
 			var ok bool
 			for i := 0; i < c.Fit.MaxRetries; i++ {
 				if resp, err := client.Get(utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_ALIVE, sId)); err != nil || resp.StatusCode != 200 {
@@ -229,6 +235,9 @@ func configure() {
 	if *fRefreshTime != 18000 {
 		c.Fit.RefreshTime = *fRefreshTime
 	}
+	if *fStartup {
+		c.Fit.AutoStartup = *fStartup
+	}
 
 	if c.Fit.Address == "" || c.Fit.Username == "" || c.Fit.Password == "" {
 		log.Print("Fortinet server address, username and password must be specified via configuration file or CLI arguments. Exiting...")
@@ -236,13 +245,20 @@ func configure() {
 		os.Exit(1)
 	}
 
-	if *fStartup {
-		c.Fit.AutoStartup = *fStartup
-		// Startup
+	utils.PrintBanner()
+
+	if c.Fit.AutoStartup {
 		if err := utils.SetStartupShortcut(); err != nil {
-			log.Printf("Cannot set startup shprtcut for F.IT program on your computer. Error: %s", err)
+			log.Printf("Cannot set startup shortcut for F.IT program on your computer. Error: %s", err)
 		} else {
-			log.Println("F.IT will automatically start up with your computer!")
+			log.Print("F.IT will automatically start with your computer!")
+		}
+	} else {
+		lnkPath := path.Join(utils.UserHomeDir(), "AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\fit.lnk")
+		if _, err := os.Stat(lnkPath); !os.IsNotExist(err) {
+			if err := os.Remove(lnkPath); err != nil {
+				log.Printf("Cannot delete F.IT startup shortcut: %s", lnkPath)
+			}
 		}
 	}
 }
