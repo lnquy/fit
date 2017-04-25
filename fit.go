@@ -112,7 +112,7 @@ func getSessionID() (sId string, ok bool) {
 		}
 
 		defer resp.Body.Close()
-		//log.Printf("Request successed. %#v\n", resp)
+		//log.Printf("Request success. %#v\n", resp)
 		fUrl := resp.Request.URL.String()
 		if strings.Contains(fUrl, c.Fit.Address) && strings.Contains(fUrl, F_AUTH) {
 			sId = fUrl[strings.Index(fUrl, "?")+1:]
@@ -245,13 +245,18 @@ func configure() {
 		os.Exit(1)
 	}
 
+	// Protect plaintext password
+	if len(c.Fit.Password) != 34 || !strings.HasPrefix(c.Fit.Password, "$") || !strings.HasSuffix(c.Fit.Password, "$") {
+		utils.ProtectPassword(c.Fit)
+	}
+
 	utils.PrintBanner()
 
 	if c.Fit.AutoStartup {
 		if err := utils.SetStartupShortcut(); err != nil {
-			log.Printf("Cannot set startup shortcut for F.IT program on your computer. Error: %s", err)
+			log.Printf("[Config] Cannot set startup shortcut for F.IT program on your computer. Error: %s", err)
 		} else {
-			log.Print("F.IT will automatically start with your computer!")
+			log.Print("[Config] F.IT will automatically start with your computer!")
 		}
 	} else {
 		lnkPath := path.Join(utils.UserHomeDir(), "AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\fit.lnk")

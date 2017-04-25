@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"path"
 	"log"
+	"github.com/lnquy/fit/config"
 )
 
 func GetFortinetURL(isHttps bool, addr, parm, sId string) (res string) {
@@ -66,6 +67,10 @@ func UserHomeDir() string {
 	return os.Getenv("HOME")
 }
 
+func ProtectPassword(fit config.FitConfig) {
+
+}
+
 func PrintBanner() {
 	banner := `
   _______        ___   _______
@@ -77,6 +82,7 @@ func PrintBanner() {
  |___|    |___| |___|   |___|
 
 Fortinet Interruption Terminator
+lnquy.it@gmail.com
 `
 	log.Println(banner)
 }
