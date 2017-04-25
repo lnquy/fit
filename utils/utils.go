@@ -17,8 +17,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"strings"
-	"encoding/json"
-	"io/ioutil"
 )
 
 const (
@@ -88,8 +86,7 @@ func ProtectPassword(c *config.FitConfig) {
 		c.Password = fmt.Sprintf("${%s}$", cypher)
 	}
 
-	config, _ := json.MarshalIndent(c, "", "    ")
-	if err := ioutil.WriteFile("fit.conf", config, 0666); err != nil {
+	if err := config.WriteToFile(); err != nil {
 		log.Println("[Config] Cannot write encrypted password to file. Your password in configuration file will be remained as plaintext :(", err)
 	} else {
 		log.Println("[Config] Your password has been encrypted automatically :)")
@@ -168,6 +165,6 @@ func PrintBanner() {
 
 Fortinet Interruption Terminator
 lnquy.it@gmail.com
-`
+--------------------------------`
 	log.Println(banner)
 }

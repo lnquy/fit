@@ -4,6 +4,7 @@ import (
 	"os"
 	"encoding/json"
 	"log"
+	"io/ioutil"
 )
 
 type FitConfig struct {
@@ -15,6 +16,7 @@ type FitConfig struct {
 	RefreshTime int `json:"refresh_time"`
 
 	AutoStartup bool `json:"auto_startup"`
+	SessionID string `json:"session_id"`
 }
 
 var Fit *FitConfig // Configuration singleton
@@ -27,6 +29,8 @@ func init() {
 		Password: "",
 		MaxRetries: 10,
 		RefreshTime: 18000,
+		AutoStartup: false,
+		SessionID: "",
 	}
 }
 
@@ -41,4 +45,9 @@ func ReadFromFile() (err error) {
 	}
 	defer file.Close()
 	return
+}
+
+func WriteToFile() (err error) {
+	fitConfig, _ := json.MarshalIndent(Fit, "", "    ")
+	return ioutil.WriteFile("fit.conf", fitConfig, 0666)
 }
