@@ -39,5 +39,6 @@ func ReadFromFile() (err error) {
 			log.Printf("Decode configuration file failed. Error: %s", err)
 		}
 	}
+	defer file.Close()
 	return
 }

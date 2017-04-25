@@ -245,12 +245,14 @@ func configure() {
 		os.Exit(1)
 	}
 
+	utils.PrintBanner()
+
 	// Protect plaintext password
-	if len(c.Fit.Password) != 34 || !strings.HasPrefix(c.Fit.Password, "$") || !strings.HasSuffix(c.Fit.Password, "$") {
+	if !strings.HasPrefix(c.Fit.Password, "${") || !strings.HasSuffix(c.Fit.Password, "}$") {
 		utils.ProtectPassword(c.Fit)
+		*fPassword = "" // Prevent plaintext password still store in memory
 	}
 
-	utils.PrintBanner()
 
 	if c.Fit.AutoStartup {
 		if err := utils.SetStartupShortcut(); err != nil {
