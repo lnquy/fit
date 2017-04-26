@@ -90,6 +90,7 @@ func main() {
 	if c.Fit.SessionID, ok = getSessionID(); ok {
 		log.Printf("Detected session ID: %s", c.Fit.SessionID)
 		log.Println("Authenticating...")
+		time.Sleep(time.Duration(1) * time.Second) // Wait for HTTP client releases transaction
 		if c.Fit.SessionID = authenticate(c.Fit.SessionID); c.Fit.SessionID != "" {
 			log.Printf("Authenticated. Current session ID: %s", c.Fit.SessionID)
 			c.WriteToFile()
@@ -115,12 +116,12 @@ func getSessionID() (sId string, ok bool) {
 		if err != nil {
 			log.Printf("Error: %s. Retrying in %v seconds...\n", err.Error(), REQ_TIMEOUT)
 			time.Sleep(time.Duration(REQ_TIMEOUT) * time.Second)
-			return
+			continue
 		}
 
-		defer resp.Body.Close()
 		//log.Printf("Request success. %#v\n", resp)
 		fUrl := resp.Request.URL.String()
+		resp.Body.Close()
 		if strings.Contains(fUrl, c.Fit.Address) && strings.Contains(fUrl, F_AUTH) {
 			sId = fUrl[strings.Index(fUrl, "?")+1:]
 			return sId, true
@@ -214,9 +215,10 @@ func keepAlive() {
 	}()
 }
 
-func logout() (err error) {
-	_, err = client.Get(utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_LOGOUT, c.Fit.SessionID))
-	return
+func logout() (error) {
+	resp, err := client.Get(utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_LOGOUT, c.Fit.SessionID))
+	defer resp.Body.Close()
+	return err
 }
 
 func configure() {

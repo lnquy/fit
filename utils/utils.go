@@ -107,7 +107,6 @@ func GetPlaintextPassword(cypher string) string {
 
 func getUUID() (uuid string) {
 	if info, err := host.Info(); err != nil {
-		log.Println("Cannot get host UUID. Will use default secret key to encrypt your password")
 		return defaultUUID
 	} else {
 		if info.HostID == "" {
