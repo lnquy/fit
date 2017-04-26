@@ -17,6 +17,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"strings"
+	"errors"
 )
 
 const (
@@ -54,14 +55,14 @@ func SetStartupShortcut() error {
 	defer wshell.Release()
 	// Note: For Windows only, not supported for Unix yet
 	startupMenu := path.Join(UserHomeDir(), "AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\fit.lnk")
-	//log.Printf("user home dir: %s", startupMenu)
+	//log.Printf("User home dir: %s", startupMenu)
 	if cs, err := oleutil.CallMethod(wshell, "CreateShortcut", startupMenu); err != nil {
 		return err
 	} else {
 		exePath, _ := os.Executable()
-		idispatch := cs.ToIDispatch()
-		oleutil.PutProperty(idispatch, "TargetPath", exePath)
-		oleutil.CallMethod(idispatch, "Save")
+		iDispatch := cs.ToIDispatch()
+		oleutil.PutProperty(iDispatch, "TargetPath", exePath)
+		oleutil.CallMethod(iDispatch, "Save")
 	}
 	return nil
 }
@@ -78,8 +79,7 @@ func UserHomeDir() string {
 }
 
 func ProtectPassword(c *config.FitConfig) {
-	key := getUUID()
-	if cypher, err := encrypt([]byte(key), c.Password); err != nil {
+	if cypher, err := encrypt(getUUID(), c.Password); err != nil {
 		log.Println("[Config] Cannot encrypt your password. Your password in configuration file will be remained as plaintext :(", err)
 		return
 	} else {
@@ -94,9 +94,8 @@ func ProtectPassword(c *config.FitConfig) {
 }
 
 func GetPlaintextPassword(cypher string) string {
-	key := getUUID()
 	cypher = strings.TrimSuffix(strings.TrimPrefix(cypher, "${"), "}$")
-	if pw, err := decrypt([]byte(key), cypher); err != nil {
+	if pw, err := decrypt(getUUID(), cypher); err != nil {
 		log.Printf("Cannot decrypt your password. Error: %s", err)
 		return ""
 	} else {
@@ -105,14 +104,14 @@ func GetPlaintextPassword(cypher string) string {
 
 }
 
-func getUUID() (uuid string) {
+func getUUID() (uuid []byte) {
 	if info, err := host.Info(); err != nil {
-		return defaultUUID
+		return []byte(defaultUUID)
 	} else {
 		if info.HostID == "" {
-			return defaultUUID
+			return []byte(defaultUUID)
 		}
-		return info.HostID[:32] // Get the first 32 bytes only
+		return []byte(info.HostID)[:32] // Get the first 32 bytes only
 	}
 }
 
@@ -123,33 +122,33 @@ func encrypt(key []byte, text string) (string, error) {
 		return "", err
 	}
 
-	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
-	iv := ciphertext[:aes.BlockSize]
+	cipherText := make([]byte, aes.BlockSize+len(plaintext))
+	iv := cipherText[:aes.BlockSize]
 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		panic(err)
+		return "", err
 	}
 	stream := cipher.NewCFBEncrypter(block, iv)
-	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
+	stream.XORKeyStream(cipherText[aes.BlockSize:], plaintext)
 
-	return base64.URLEncoding.EncodeToString(ciphertext), nil
+	return base64.URLEncoding.EncodeToString(cipherText), nil
 }
 
 func decrypt(key []byte, cryptoText string) (string, error) {
-	ciphertext, _ := base64.URLEncoding.DecodeString(cryptoText)
+	cipherText, _ := base64.URLEncoding.DecodeString(cryptoText)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
 
-	if len(ciphertext) < aes.BlockSize {
-		panic("ciphertext too short")
+	if len(cipherText) < aes.BlockSize {
+		return "", errors.New("Cyphertext too short")
 	}
-	iv := ciphertext[:aes.BlockSize]
-	ciphertext = ciphertext[aes.BlockSize:]
+	iv := cipherText[:aes.BlockSize]
+	cipherText = cipherText[aes.BlockSize:]
 	stream := cipher.NewCFBDecrypter(block, iv)
-	stream.XORKeyStream(ciphertext, ciphertext)
+	stream.XORKeyStream(cipherText, cipherText)
 
-	return fmt.Sprintf("%s", ciphertext), nil
+	return fmt.Sprintf("%s", cipherText), nil
 }
 
 func PrintBanner() {

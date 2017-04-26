@@ -90,7 +90,7 @@ func main() {
 	if c.Fit.SessionID, ok = getSessionID(); ok {
 		log.Printf("Detected session ID: %s", c.Fit.SessionID)
 		log.Println("Authenticating...")
-		time.Sleep(time.Duration(1) * time.Second) // Wait for HTTP client releases transaction
+		time.Sleep(time.Duration(1) * time.Second) // Wait HTTP client to release transaction
 		if c.Fit.SessionID = authenticate(c.Fit.SessionID); c.Fit.SessionID != "" {
 			log.Printf("Authenticated. Current session ID: %s", c.Fit.SessionID)
 			c.WriteToFile()
