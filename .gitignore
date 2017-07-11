@@ -2,4 +2,6 @@
 *.exe
 vendor
 build
-etc
+etc/fit.log
+etc/fit.bin
+etc/fit
