@@ -4,28 +4,24 @@ import (
 	"bytes"
 	"crypto/tls"
 	"flag"
-	c "github.com/lnquy/fit/config"
+	cfg "github.com/lnquy/fit/conf"
+	"github.com/lnquy/fit/modules/boot"
+	glb "github.com/lnquy/fit/modules/global"
 	"github.com/lnquy/fit/utils"
 	"github.com/mvdan/xurls"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
-	"path"
-)
-
-const (
-	REQ_TIMEOUT int    = 15
-	HOST_TARGET string = "https://google.com"
-	F_AUTH      string = "fgtauth"
-	F_ALIVE     string = "keepalive"
-	F_LOGOUT    string = "logout"
 )
 
 var (
 	// Flags
+	fDebug        *bool
 	fFortinetAddr *string
 	fIsHttps      *bool
 	fUsername     *string
@@ -36,38 +32,25 @@ var (
 	fSessionId    *string
 
 	client  *http.Client
-	ticker  *time.Ticker
+	ticker  *time.Ticker // Ticker for refreshing session id
 	logFile *os.File
-	//mw      io.Writer
-	exit chan bool
+	mw      io.Writer // Multi writer
+	exit    chan bool
 )
 
 func init() {
-	// Write log to file and stdout
-	var err error
-	logPath, _ := os.Getwd()
-	logPath = path.Join(logPath, "fit.log")
-	if _, err = os.Stat(logPath); !os.IsNotExist(err) {
-		os.Remove(logPath)
-	}
-	logFile, err = os.OpenFile("fit.log", os.O_RDWR|os.O_CREATE, 0666) // |os.O_APPEND
-	if err != nil {
-		log.Fatalf("Error opening log file: %v", err)
-	}
-	//mw = io.MultiWriter(os.Stdout, logFile)
-	log.SetOutput(logFile)
-
-	fFortinetAddr = flag.String("a", "", "Fortigate <IP/Hostname:Port> address")
-	fIsHttps = flag.Bool("h", true, "Is Fortigate server use HTTPS protocol?")
-	fUsername = flag.String("u", "", "Your username")
-	fPassword = flag.String("p", "", "Your password")
-	fMaxRetries = flag.Int("n", 10, "Maximum retry times before terminating")
-	fRefreshTime = flag.Int("r", 18000, "Time to wait until check and refresh Fortigate session in second")
-	fStartup = flag.Bool("s", false, "Allow F.IT automatically run when your computer started up?")
-	fSessionId = flag.String("i", "", "Your current Fortinet session ID")
+	fDebug = flag.Bool("d", false, "Debug mode") // Debug mode will write log to both stdout and file
+	fFortinetAddr = flag.String("ip", "", "Fortigate <IP/Hostname:Port> address")
+	fIsHttps = flag.Bool("https", true, "Is Fortigate server use HTTPS protocol?")
+	fUsername = flag.String("username", "", "Your username")
+	fPassword = flag.String("password", "", "Your password")
+	fMaxRetries = flag.Int("retries", glb.DEFAULT_MAX_RETRIES, "Maximum retry times before terminating")
+	fRefreshTime = flag.Int("refresh", glb.DEFAULT_REFRESH_TIME, "Time to wait until check and refresh Fortigate session in second")
+	fStartup = flag.Bool("auto-start", false, "Allow F.IT automatically run when your computer started up?")
+	fSessionId = flag.String("session-id", "", "Your current Fortinet session ID")
 
 	client = &http.Client{
-		Timeout: time.Duration(REQ_TIMEOUT) * time.Second,
+		Timeout: time.Duration(glb.DEFAULT_REQ_TIMEOUT) * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true,
@@ -78,68 +61,115 @@ func init() {
 	exit = make(chan bool)
 }
 
-func main() {
-	configure()
-	defer logFile.Close()
+func configure() {
+	cfg.ReadFromFile()
 
-	if c.Fit.SessionID != "" { // Terminate old session to handle new one
-		logout()
+	// Override configs by CLI args
+	flag.Parse()
+	if *fFortinetAddr != "" {
+		cfg.Fit.Address = *fFortinetAddr
+	}
+	if !*fIsHttps {
+		cfg.Fit.IsHTTPS = *fIsHttps
+	}
+	if *fUsername != "" {
+		cfg.Fit.Username = *fUsername
+	}
+	if *fPassword != "" {
+		cfg.Fit.Password = *fPassword
+	}
+	*fPassword = ""
+	if *fMaxRetries != glb.DEFAULT_MAX_RETRIES {
+		cfg.Fit.MaxRetries = *fMaxRetries
+	}
+	if *fRefreshTime != glb.DEFAULT_REFRESH_TIME {
+		cfg.Fit.RefreshTime = *fRefreshTime
+	}
+	if *fStartup {
+		cfg.Fit.AutoStartup = *fStartup
+	}
+	if *fSessionId != "" {
+		cfg.Fit.SessionID = *fSessionId
 	}
 
-	var ok bool
-	if c.Fit.SessionID, ok = getSessionID(); ok {
-		log.Printf("Detected session ID: %s", c.Fit.SessionID)
-		log.Println("Authenticating...")
-		time.Sleep(time.Duration(1) * time.Second) // Wait HTTP client to release transaction
-		if c.Fit.SessionID = authenticate(c.Fit.SessionID); c.Fit.SessionID != "" {
-			log.Printf("Authenticated. Current session ID: %s", c.Fit.SessionID)
-			c.WriteToFile()
-			log.Printf("Welcome to the Internet. Your session will be refreshed automatically in %d seconds", c.Fit.RefreshTime)
-			keepAlive()
-			<-exit
-			log.Println("Terminated. Exiting...")
-		} else {
-			log.Printf("Maximum retried (%v). Please check your username/password. Exiting...", c.Fit.MaxRetries)
-		}
+	// Configure log output
+	var err error
+	logPath, _ := os.Getwd()
+	logPath = path.Join(logPath, "fit.log")
+	if _, err = os.Stat(logPath); !os.IsNotExist(err) {
+		os.Remove(logPath)
+	}
+	logFile, err = os.OpenFile("fit.log", os.O_RDWR|os.O_CREATE, 0666) // |os.O_APPEND
+	if err != nil {
+		log.Fatalf("Error opening log file: %v", err)
+	}
+	if *fDebug {
+		mw = io.MultiWriter(os.Stdout, logFile)
+		log.SetOutput(mw)
 	} else {
-		log.Printf("Maximum retried (%v). Failed to detect Fortigate's session ID. Exiting...", c.Fit.MaxRetries)
+		log.SetOutput(logFile)
 	}
-	log.Println("Have a good day. Bye mate!")
 
-	// TODO: Exit gratefully
+	// Validate required fields
+	if cfg.Fit.Address == "" || cfg.Fit.Username == "" || cfg.Fit.Password == "" {
+		log.Print("Fortinet server address, username and password must be specified via configuration file or CLI arguments. Exiting...")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
+	utils.PrintBanner()
+
+	// Protect plaintext password
+	if !strings.HasPrefix(cfg.Fit.Password, "${") || !strings.HasSuffix(cfg.Fit.Password, "}$") {
+		if pp := utils.GetProtectedPassword(cfg.Fit.Password); pp != "" {
+			cfg.Fit.Password = pp
+			if err := cfg.WriteToFile(); err != nil {
+				log.Println("[Config] Cannot write encrypted password to file", err)
+			} else {
+				log.Println("[Config] Your password has been encrypted automatically")
+			}
+		}
+	}
+
+	// Auto start when computer booting up
+	if cfg.Fit.AutoStartup {
+		boot.EnableAutoStartup()
+	} else {
+		boot.DisableAutoStartup()
+	}
 }
 
 func getSessionID() (sId string, ok bool) {
-	for i := 0; i < c.Fit.MaxRetries; i++ {
+	for i := 0; i < cfg.Fit.MaxRetries; i++ {
 		log.Println("Detecting your current Fortigate session ID...")
-		resp, err := client.Get(HOST_TARGET)
+		resp, err := client.Get(glb.TEST_TARGET)
 		if err != nil {
-			log.Printf("Error: %s. Retrying in %v seconds...\n", err.Error(), REQ_TIMEOUT)
-			time.Sleep(time.Duration(REQ_TIMEOUT) * time.Second)
+			log.Printf("Error: %s. Retrying in %v seconds...\n", err.Error(), glb.DEFAULT_REQ_TIMEOUT)
+			time.Sleep(time.Duration(glb.DEFAULT_REQ_TIMEOUT) * time.Second)
 			continue
 		}
 
 		//log.Printf("Request success. %#v\n", resp)
 		fUrl := resp.Request.URL.String()
 		resp.Body.Close()
-		if strings.Contains(fUrl, c.Fit.Address) && strings.Contains(fUrl, F_AUTH) {
+		if strings.Contains(fUrl, cfg.Fit.Address) && strings.Contains(fUrl, glb.F_AUTH) {
 			sId = fUrl[strings.Index(fUrl, "?")+1:]
 			return sId, true
 		}
 
-		log.Printf("Detect Fortigate session ID failed. Retrying in %v seconds...", REQ_TIMEOUT)
-		time.Sleep(time.Duration(REQ_TIMEOUT) * time.Second)
+		log.Printf("Detect Fortigate session ID failed. Retrying in %v seconds...", glb.DEFAULT_REQ_TIMEOUT)
+		time.Sleep(time.Duration(glb.DEFAULT_REQ_TIMEOUT) * time.Second)
 	}
 	return
 }
 
 func authenticate(id string) (aId string) {
-	for i := 0; i < c.Fit.MaxRetries; i++ {
+	for i := 0; i < cfg.Fit.MaxRetries; i++ {
 		if aId = authenticateRequest(id); aId != "" {
 			return
 		}
-		log.Printf("Authenticate failed. Retrying in %v seconds...", REQ_TIMEOUT)
-		time.Sleep(time.Second * time.Duration(REQ_TIMEOUT))
+		log.Printf("Authenticate failed. Retrying in %v seconds...", glb.DEFAULT_REQ_TIMEOUT)
+		time.Sleep(time.Second * time.Duration(glb.DEFAULT_REQ_TIMEOUT))
 	}
 	return
 }
@@ -147,8 +177,8 @@ func authenticate(id string) (aId string) {
 func authenticateRequest(id string) (res string) {
 	var req *http.Request
 	var err error
-	authUrl := utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_AUTH, id)
-	authData := utils.GetAuthPostReqData(id, c.Fit.Username, c.Fit.Password)
+	authUrl := utils.GetFortinetURL(cfg.Fit.IsHTTPS, cfg.Fit.Address, glb.F_AUTH, id)
+	authData := utils.GetAuthPostReqData(id, cfg.Fit.Username, cfg.Fit.Password)
 	if req, err = http.NewRequest("POST", authUrl, bytes.NewBuffer([]byte(authData))); err != nil {
 		return
 	}
@@ -181,25 +211,25 @@ func authenticateRequest(id string) (res string) {
 
 func extractSessionIDFromUrls(urls []string) string {
 	for _, u := range urls {
-		if strings.Contains(u, c.Fit.Address) && strings.Contains(u, F_ALIVE) {
-			return u[strings.Index(u, F_ALIVE)+10:]
+		if strings.Contains(u, cfg.Fit.Address) && strings.Contains(u, glb.F_ALIVE) {
+			return u[strings.Index(u, glb.F_ALIVE)+10:]
 		}
 	}
 	return ""
 }
 
 func keepAlive() {
-	ticker = time.NewTicker(time.Second * time.Duration(c.Fit.RefreshTime))
+	ticker = time.NewTicker(time.Second * time.Duration(cfg.Fit.RefreshTime))
 	go func() {
 		for t := range ticker.C {
 			log.Printf("Keep alive at %s", t)
 			var ok bool
-			for i := 0; i < c.Fit.MaxRetries; i++ {
-				if resp, err := client.Get(utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_ALIVE, c.Fit.SessionID)); err != nil || resp.StatusCode != 200 {
-					log.Printf("Keep alive failed. Retrying in %v seconds...", REQ_TIMEOUT)
-					time.Sleep(time.Second * time.Duration(REQ_TIMEOUT))
+			for i := 0; i < cfg.Fit.MaxRetries; i++ {
+				if resp, err := client.Get(utils.GetFortinetURL(cfg.Fit.IsHTTPS, cfg.Fit.Address, glb.F_ALIVE, cfg.Fit.SessionID)); err != nil || resp.StatusCode != 200 {
+					log.Printf("Keep alive failed. Retrying in %v seconds...", glb.DEFAULT_REQ_TIMEOUT)
+					time.Sleep(time.Second * time.Duration(glb.DEFAULT_REQ_TIMEOUT))
 				} else {
-					log.Printf("Keep alive successed (%s). Next check after %d seconds", c.Fit.SessionID, c.Fit.RefreshTime)
+					log.Printf("Keep alive successed (%s). Next check after %d seconds", cfg.Fit.SessionID, cfg.Fit.RefreshTime)
 					ok = true
 					break
 				}
@@ -215,68 +245,39 @@ func keepAlive() {
 	}()
 }
 
-func logout() (error) {
-	resp, err := client.Get(utils.GetFortinetURL(c.Fit.IsHTTPS, c.Fit.Address, F_LOGOUT, c.Fit.SessionID))
+func logout() error {
+	resp, err := client.Get(utils.GetFortinetURL(cfg.Fit.IsHTTPS, cfg.Fit.Address, glb.F_LOGOUT, cfg.Fit.SessionID))
 	defer resp.Body.Close()
 	return err
 }
 
-func configure() {
-	c.ReadFromFile()
+func main() {
+	configure()
+	defer logFile.Close()
 
-	// Override configs by CLI args
-	flag.Parse()
-	if *fFortinetAddr != "" {
-		c.Fit.Address = *fFortinetAddr
-	}
-	if !*fIsHttps {
-		c.Fit.IsHTTPS = *fIsHttps
-	}
-	if *fUsername != "" {
-		c.Fit.Username = *fUsername
-	}
-	if *fPassword != "" {
-		c.Fit.Password = *fPassword
-	}
-	if *fMaxRetries != 10 {
-		c.Fit.MaxRetries = *fMaxRetries
-	}
-	if *fRefreshTime != 18000 {
-		c.Fit.RefreshTime = *fRefreshTime
-	}
-	if *fStartup {
-		c.Fit.AutoStartup = *fStartup
-	}
-	if *fSessionId != "" {
-		c.Fit.SessionID = *fSessionId
+	if cfg.Fit.SessionID != "" { // Terminate old session to handle new one
+		logout()
 	}
 
-	if c.Fit.Address == "" || c.Fit.Username == "" || c.Fit.Password == "" {
-		log.Print("Fortinet server address, username and password must be specified via configuration file or CLI arguments. Exiting...")
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
-
-	utils.PrintBanner()
-
-	// Protect plaintext password
-	if !strings.HasPrefix(c.Fit.Password, "${") || !strings.HasSuffix(c.Fit.Password, "}$") {
-		utils.ProtectPassword(c.Fit)
-		*fPassword = "" // Prevent plaintext password still store in memory
-	}
-
-	if c.Fit.AutoStartup {
-		if err := utils.SetStartupShortcut(); err != nil {
-			log.Printf("[Config] Cannot set startup shortcut for F.IT program on your computer. Error: %s", err)
+	var ok bool
+	if cfg.Fit.SessionID, ok = getSessionID(); ok {
+		log.Printf("Detected session ID: %s", cfg.Fit.SessionID)
+		log.Println("Authenticating...")
+		time.Sleep(time.Duration(1) * time.Second) // Wait HTTP client to release transaction
+		if cfg.Fit.SessionID = authenticate(cfg.Fit.SessionID); cfg.Fit.SessionID != "" {
+			log.Printf("Authenticated. Current session ID: %s", cfg.Fit.SessionID)
+			cfg.WriteToFile()
+			log.Printf("Welcome to the Internet. Your session will be refreshed automatically in %d seconds", cfg.Fit.RefreshTime)
+			keepAlive()
+			<-exit
+			log.Println("Terminated. Exiting...")
 		} else {
-			log.Print("[Config] F.IT will automatically start with your computer!")
+			log.Printf("Maximum retried (%v). Please check your username/password. Exiting...", cfg.Fit.MaxRetries)
 		}
 	} else {
-		lnkPath := path.Join(utils.UserHomeDir(), "AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\fit.lnk")
-		if _, err := os.Stat(lnkPath); !os.IsNotExist(err) {
-			if err := os.Remove(lnkPath); err != nil {
-				log.Printf("Cannot delete F.IT startup shortcut: %s", lnkPath)
-			}
-		}
+		log.Printf("Maximum retried (%v). Failed to detect Fortigate's session ID. Exiting...", cfg.Fit.MaxRetries)
 	}
+	log.Println("Have a good day. Bye mate!")
+
+	// TODO: Exit gratefully
 }

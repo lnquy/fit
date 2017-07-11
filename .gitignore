@@ -2,3 +2,4 @@
 *.exe
 vendor
 build
+etc
