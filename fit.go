@@ -64,7 +64,7 @@ func init() {
 func configure() {
 	cfg.ReadFromFile()
 
-	// Override configs by CLI args
+	// Override file configs by CLI args
 	flag.Parse()
 	if *fFortinetAddr != "" {
 		cfg.Fit.Address = *fFortinetAddr
@@ -93,12 +93,12 @@ func configure() {
 	}
 
 	// Configure log output
-	var err error
 	logPath, _ := os.Getwd()
 	logPath = path.Join(logPath, "fit.log")
-	if _, err = os.Stat(logPath); !os.IsNotExist(err) {
-		os.Remove(logPath)
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		os.Remove(logPath) // Remove old log files
 	}
+	var err error
 	logFile, err = os.OpenFile("fit.log", os.O_RDWR|os.O_CREATE, 0666) // |os.O_APPEND
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
@@ -257,13 +257,14 @@ func main() {
 
 	if cfg.Fit.SessionID != "" { // Terminate old session to handle new one
 		logout()
+		log.Println("Terminated your old Fortinet session")
 	}
 
 	var ok bool
 	if cfg.Fit.SessionID, ok = getSessionID(); ok {
 		log.Printf("Detected session ID: %s", cfg.Fit.SessionID)
 		log.Println("Authenticating...")
-		time.Sleep(time.Duration(1) * time.Second) // Wait HTTP client to release transaction
+		time.Sleep(time.Second) // Wait HTTP client to release transaction
 		if cfg.Fit.SessionID = authenticate(cfg.Fit.SessionID); cfg.Fit.SessionID != "" {
 			log.Printf("Authenticated. Current session ID: %s", cfg.Fit.SessionID)
 			cfg.WriteToFile()
@@ -279,5 +280,5 @@ func main() {
 	}
 	log.Println("Have a good day. Bye mate!")
 
-	// TODO: Exit gratefully
+	// TODO: Exit gracefully
 }
