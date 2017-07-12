@@ -1,17 +1,19 @@
 package utils
 
 import (
-	"net/url"
-	"fmt"
-	"log"
-	"github.com/shirou/gopsutil/host"
 	"crypto/aes"
-	"io"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
-	"strings"
 	"errors"
+	"fmt"
+	glb "github.com/lnquy/fit/modules/global"
+	"github.com/shirou/gopsutil/host"
+	"io"
+	"log"
+	"net/url"
+	"strings"
+	"time"
 )
 
 const (
@@ -27,7 +29,7 @@ func GetFortinetURL(isHttps bool, addr, parm, sId string) (res string) {
 	return
 }
 
-func GetAuthPostReqData(sId, username, password string) (string) {
+func GetAuthPostReqData(sId, username, password string) string {
 	return fmt.Sprintf("magic=%s&username=%s&password=%s",
 		sId,
 		url.QueryEscape(username),
@@ -37,7 +39,7 @@ func GetAuthPostReqData(sId, username, password string) (string) {
 
 func GetProtectedPassword(passwd string) string {
 	if cypher, err := encrypt(getUUID(), passwd); err != nil {
-		log.Println("[Config] Cannot encrypt your password", err)
+		log.Printf("Failed to encrypt your password: %s", err)
 		return ""
 	} else {
 		return fmt.Sprintf("${%s}$", cypher)
@@ -47,7 +49,7 @@ func GetProtectedPassword(passwd string) string {
 func GetPlaintextPassword(cypher string) string {
 	cypher = strings.TrimSuffix(strings.TrimPrefix(cypher, "${"), "}$")
 	if pw, err := decrypt(getUUID(), cypher); err != nil {
-		log.Printf("Cannot decrypt your password. Error: %s", err)
+		log.Printf("Failed to decrypt your password: %s", err)
 		return ""
 	} else {
 		return string(pw[:])
@@ -102,18 +104,29 @@ func decrypt(key []byte, cryptoText string) (string, error) {
 	return fmt.Sprintf("%s", cipherText), nil
 }
 
+func GetTerminationTicker() *time.Ticker {
+	now := time.Now()
+	nextTick := time.Date(now.Year(), now.Month(), now.Day(), glb.TERM_HOUR, glb.TERM_MIN, glb.TERM_SEC, 0, time.Local)
+	if !nextTick.After(now) {
+		nextTick = nextTick.Add(time.Hour * 24)
+	}
+	log.Printf("Auto terminate old session and retrieve new one at: %s", nextTick.String())
+	diff := nextTick.Sub(now)
+	return time.NewTicker(diff)
+}
+
 func PrintBanner() {
 	banner := `
-  _______        ___   _______
- |       |      |   | |       |
- |    ___|      |   | |_     _|
- |   |___       |   |   |   |
- |    ___| ___  |   |   |   |
- |   |    |   | |   |   |   |
- |___|    |___| |___|   |___|
-
-Fortinet Interruption Terminator
-lnquy.it@gmail.com
---------------------------------`
-	log.Println(banner)
+    _______        ___   _______
+   |       |      |   | |       |
+   |    ___|      |   | |_     _|
+   |   |___       |   |   |   |
+   |    ___| ___  |   |   |   |
+   |   |    |   | |   |   |   |
+   |___|    |___| |___|   |___|
+-------------------------------------
+Fortinet Interruption Terminator %s
+Contact: Quy Le (lnquy.it@gmail.com)
+-------------------------------------`
+	log.Printf(banner, glb.FIT_VERSION)
 }

@@ -5,7 +5,7 @@ import (
 )
 
 func EnableAutoStartup() {
-	log.Println("Enable auto start in Linux")
+	log.Println("Auto start feature is not supported in Linux yet")
 }
 
 func DisableAutoStartup() {

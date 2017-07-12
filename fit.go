@@ -14,8 +14,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -32,10 +34,9 @@ var (
 	fSessionId    *string
 
 	client  *http.Client
-	ticker  *time.Ticker // Ticker for refreshing session id
 	logFile *os.File
-	mw      io.Writer // Multi writer
-	exit    chan bool
+	mw      io.Writer      // Multi writer
+	exit    chan os.Signal // Graceful exit channel
 )
 
 func init() {
@@ -44,7 +45,7 @@ func init() {
 	fIsHttps = flag.Bool("https", true, "Is Fortigate server use HTTPS protocol?")
 	fUsername = flag.String("username", "", "Your username")
 	fPassword = flag.String("password", "", "Your password")
-	fMaxRetries = flag.Int("retries", glb.DEFAULT_MAX_RETRIES, "Maximum retry times before terminating")
+	fMaxRetries = flag.Int("retries", glb.DEFAULT_MAX_RETRIES, "Maximum retry times before terminating old session")
 	fRefreshTime = flag.Int("refresh", glb.DEFAULT_REFRESH_TIME, "Time to wait until check and refresh Fortigate session in second")
 	fStartup = flag.Bool("auto-start", false, "Allow F.IT automatically run when your computer started up?")
 	fSessionId = flag.String("session-id", "", "Your current Fortinet session ID")
@@ -58,7 +59,8 @@ func init() {
 		},
 	}
 
-	exit = make(chan bool)
+	exit = make(chan os.Signal)
+	signal.Notify(exit, syscall.SIGTERM, syscall.SIGINT)
 }
 
 func configure() {
@@ -101,7 +103,7 @@ func configure() {
 	var err error
 	logFile, err = os.OpenFile("fit.log", os.O_RDWR|os.O_CREATE, 0666) // |os.O_APPEND
 	if err != nil {
-		log.Fatalf("Error opening log file: %v", err)
+		log.Fatalf("Failed to open log file: %v", err)
 	}
 	if *fDebug {
 		mw = io.MultiWriter(os.Stdout, logFile)
@@ -124,9 +126,9 @@ func configure() {
 		if pp := utils.GetProtectedPassword(cfg.Fit.Password); pp != "" {
 			cfg.Fit.Password = pp
 			if err := cfg.WriteToFile(); err != nil {
-				log.Println("[Config] Cannot write encrypted password to file", err)
+				log.Printf("Failed to write encrypted password to file: %s", err)
 			} else {
-				log.Println("[Config] Your password has been encrypted automatically")
+				log.Println("Your password has been encrypted automatically")
 			}
 		}
 	}
@@ -144,8 +146,8 @@ func getSessionID() (sId string, ok bool) {
 		log.Println("Detecting your current Fortigate session ID...")
 		resp, err := client.Get(glb.TEST_TARGET)
 		if err != nil {
-			log.Printf("Error: %s. Retrying in %v seconds...\n", err.Error(), glb.DEFAULT_REQ_TIMEOUT)
-			time.Sleep(time.Duration(glb.DEFAULT_REQ_TIMEOUT) * time.Second)
+			log.Printf("Error: %s. Retrying in %v seconds...\n", err.Error(), glb.WAIT_TIME)
+			time.Sleep(time.Duration(glb.WAIT_TIME) * time.Second)
 			continue
 		}
 
@@ -157,8 +159,8 @@ func getSessionID() (sId string, ok bool) {
 			return sId, true
 		}
 
-		log.Printf("Detect Fortigate session ID failed. Retrying in %v seconds...", glb.DEFAULT_REQ_TIMEOUT)
-		time.Sleep(time.Duration(glb.DEFAULT_REQ_TIMEOUT) * time.Second)
+		log.Printf("Failed to detect Fortigate session ID. Retrying in %v seconds...", glb.WAIT_TIME)
+		time.Sleep(time.Duration(glb.WAIT_TIME) * time.Second)
 	}
 	return
 }
@@ -168,8 +170,8 @@ func authenticate(id string) (aId string) {
 		if aId = authenticateRequest(id); aId != "" {
 			return
 		}
-		log.Printf("Authenticate failed. Retrying in %v seconds...", glb.DEFAULT_REQ_TIMEOUT)
-		time.Sleep(time.Second * time.Duration(glb.DEFAULT_REQ_TIMEOUT))
+		log.Printf("Authenticate failed. Retrying in %v seconds...", glb.WAIT_TIME)
+		time.Sleep(time.Second * time.Duration(glb.WAIT_TIME))
 	}
 	return
 }
@@ -212,22 +214,24 @@ func authenticateRequest(id string) (res string) {
 func extractSessionIDFromUrls(urls []string) string {
 	for _, u := range urls {
 		if strings.Contains(u, cfg.Fit.Address) && strings.Contains(u, glb.F_ALIVE) {
-			return u[strings.Index(u, glb.F_ALIVE)+10:]
+			return u[strings.Index(u, glb.F_ALIVE)+10:] // keepalive?session_id
 		}
 	}
 	return ""
 }
 
-func keepAlive() {
-	ticker = time.NewTicker(time.Second * time.Duration(cfg.Fit.RefreshTime))
-	go func() {
-		for t := range ticker.C {
-			log.Printf("Keep alive at %s", t)
+func keepAlive(retChan chan bool) {
+	refTicker := time.NewTicker(time.Second * time.Duration(cfg.Fit.RefreshTime))
+	termTicker := utils.GetTerminationTicker()
+	for {
+		select {
+		case t := <-refTicker.C:
+			log.Printf("Keep alive tick at %s", t)
 			var ok bool
 			for i := 0; i < cfg.Fit.MaxRetries; i++ {
 				if resp, err := client.Get(utils.GetFortinetURL(cfg.Fit.IsHTTPS, cfg.Fit.Address, glb.F_ALIVE, cfg.Fit.SessionID)); err != nil || resp.StatusCode != 200 {
-					log.Printf("Keep alive failed. Retrying in %v seconds...", glb.DEFAULT_REQ_TIMEOUT)
-					time.Sleep(time.Second * time.Duration(glb.DEFAULT_REQ_TIMEOUT))
+					log.Printf("Keep alive failed. Retrying in %v seconds...", glb.WAIT_TIME)
+					time.Sleep(time.Second * time.Duration(glb.WAIT_TIME))
 				} else {
 					log.Printf("Keep alive successed (%s). Next check after %d seconds", cfg.Fit.SessionID, cfg.Fit.RefreshTime)
 					ok = true
@@ -236,49 +240,70 @@ func keepAlive() {
 			}
 
 			if !ok {
-				// TODO: Trying to logout and re-authenticate
-				log.Println("Cannot refresh your session. Please check and try again!")
-				ticker.Stop()
-				exit <- true
+				log.Printf("Failed to refresh session %s", cfg.Fit.SessionID)
+				refTicker.Stop()
+				retChan <- true // Try to terminate old session and handle new one
 			}
+		case t := <-termTicker.C:
+			log.Printf("Terminate session tick at: %v", t)
+			refTicker.Stop()
+			retChan <- true
 		}
-	}()
+	}
 }
 
 func logout() error {
 	resp, err := client.Get(utils.GetFortinetURL(cfg.Fit.IsHTTPS, cfg.Fit.Address, glb.F_LOGOUT, cfg.Fit.SessionID))
+	if err == nil {
+		log.Printf("Terminated your Fortinet session (%v)", cfg.Fit.SessionID)
+		cfg.Fit.SessionID = ""
+	}
 	defer resp.Body.Close()
 	return err
+}
+
+func fit() bool {
+	var ok bool
+	if cfg.Fit.SessionID, ok = getSessionID(); ok {
+		log.Printf("Fortinet session ID detected: %s", cfg.Fit.SessionID)
+		log.Println("Authenticating...")
+		time.Sleep(time.Second * time.Duration(glb.WAIT_TIME)) // Wait HTTP client to release transaction
+		if cfg.Fit.SessionID = authenticate(cfg.Fit.SessionID); cfg.Fit.SessionID != "" {
+			log.Printf("Authenticated. Current session ID: %s", cfg.Fit.SessionID)
+			cfg.WriteToFile()
+			log.Printf("Welcome to the Internet. Your session will be refreshed automatically in %d seconds", cfg.Fit.RefreshTime)
+
+			kaChan := make(chan bool, 1)
+			go keepAlive(kaChan)
+			return <-kaChan
+		} else {
+			log.Println("Failed to authenticate. Please check the Fortinet address and your username/password then try again")
+			return false
+		}
+	} else {
+		return true // Terminate old session and handle new one
+	}
 }
 
 func main() {
 	configure()
 	defer logFile.Close()
 
-	if cfg.Fit.SessionID != "" { // Terminate old session to handle new one
-		logout()
-		log.Println("Terminated your old Fortinet session")
-	}
+	go func() { // Graceful exit
+		<-exit
+		log.Println("Have a good day. Bye mate!")
+		os.Exit(0)
+	}()
 
-	var ok bool
-	if cfg.Fit.SessionID, ok = getSessionID(); ok {
-		log.Printf("Detected session ID: %s", cfg.Fit.SessionID)
-		log.Println("Authenticating...")
-		time.Sleep(time.Second) // Wait HTTP client to release transaction
-		if cfg.Fit.SessionID = authenticate(cfg.Fit.SessionID); cfg.Fit.SessionID != "" {
-			log.Printf("Authenticated. Current session ID: %s", cfg.Fit.SessionID)
-			cfg.WriteToFile()
-			log.Printf("Welcome to the Internet. Your session will be refreshed automatically in %d seconds", cfg.Fit.RefreshTime)
-			keepAlive()
-			<-exit
-			log.Println("Terminated. Exiting...")
-		} else {
-			log.Printf("Maximum retried (%v). Please check your username/password. Exiting...", cfg.Fit.MaxRetries)
+	for {
+		if cfg.Fit.SessionID != "" { // Terminate old session to handle new one
+			logout()
 		}
-	} else {
-		log.Printf("Maximum retried (%v). Failed to detect Fortigate's session ID. Exiting...", cfg.Fit.MaxRetries)
+		if !fit() {
+			break
+		}
+		log.Printf("Dropping old session (%v) to handle new one", cfg.Fit.SessionID)
 	}
-	log.Println("Have a good day. Bye mate!")
 
-	// TODO: Exit gracefully
+	log.Println("Have a good day. Bye mate!")
 }

@@ -1,19 +1,19 @@
 package boot
 
 import (
+	"github.com/go-ole/go-ole"
+	"github.com/go-ole/go-ole/oleutil"
 	"github.com/lnquy/fit/utils"
 	"log"
 	"os"
 	"path"
-	"github.com/go-ole/go-ole"
-	"github.com/go-ole/go-ole/oleutil"
 )
 
 func EnableAutoStartup() {
 	if err := setStartupShortcut(); err != nil {
-		log.Printf("[Config] Cannot set startup shortcut for F.IT program on your computer. Error: %s", err)
+		log.Printf("Failed to create startup shortcut for F.IT program on your computer. Error: %s", err)
 	} else {
-		log.Print("[Config] F.IT will automatically start with your computer!")
+		log.Print("F.IT will automatically start with your computer!")
 	}
 }
 
@@ -21,7 +21,7 @@ func DisableAutoStartup() {
 	lnkPath := path.Join(utils.UserHomeDir(), "AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\fit.lnk")
 	if _, err := os.Stat(lnkPath); !os.IsNotExist(err) {
 		if err := os.Remove(lnkPath); err != nil {
-			log.Printf("Cannot delete F.IT startup shortcut: %s", lnkPath)
+			log.Printf("Failed to delete F.IT startup shortcut: %s", lnkPath)
 		}
 	}
 }
