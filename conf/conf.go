@@ -16,22 +16,24 @@ type FitConfig struct {
 	MaxRetries  int    `json:"max_retries"`
 	RefreshTime int    `json:"refresh_time"`
 
-	AutoStartup bool   `json:"auto_startup"`
-	SessionID   string `json:"session_id"`
+	AutoStartup     bool   `json:"auto_startup"`
+	TerminationTime string   `json:"termination_time"`
+	SessionID       string `json:"session_id"`
 }
 
 var Fit *FitConfig // Configuration singleton
 
 func init() {
 	Fit = &FitConfig{
-		IsHTTPS:     true,
-		Address:     glb.DEFAULT_FORTINET_ADDR,
-		Username:    "",
-		Password:    "",
-		MaxRetries:  glb.DEFAULT_MAX_RETRIES,
-		RefreshTime: glb.DEFAULT_REFRESH_TIME,
-		AutoStartup: false,
-		SessionID:   "",
+		IsHTTPS:       true,
+		Address:       glb.DEFAULT_FORTINET_ADDR,
+		Username:      "",
+		Password:      "",
+		MaxRetries:    glb.DEFAULT_MAX_RETRIES,
+		RefreshTime:   glb.DEFAULT_REFRESH_TIME,
+		AutoStartup:   false,
+		TerminationTime: glb.DEFAULT_TERM_TIME,
+		SessionID:     "",
 	}
 }
 

@@ -1,13 +1,11 @@
 # Fortinet Interruption Terminator (F.IT)
----  
-
+F.IT is a tool to help anyone working under a Fortinet/FortiGuard proxy which requires you to authenticate to have access to the Internet.  
+F.IT runs in background and automate the authentication, session keep alive and renew processes.  
+Currently supports for Windows and Linux.  
 ```
-@version: v0.2.0
+@version: v0.2.1
 @email:  lnquy.it@gmail.com / lnquy@tma.com.vn
 ```
-F.IT is a tool to help anyone working under a FortiGuard proxy which requires you to authenticate to have access to the Internet.  
-F.IT runs in background and automate the authentication, session keep alive process.  
-Currently supports for Linux and Windows.
 
 ## Features
 - Detect Fortinet session ID.
@@ -27,21 +25,22 @@ Currently supports for Linux and Windows.
    max_retries:         Maximum times F.IT should retry before it terminates itself (default 10)
    refresh_time:        Interval time in second F.IT will go to refresh your session (default 10800 - 3 hours
    auto_start:          Allow F.IT to started up with your computer (default false. Not supported for Linux yet)
+   termination_time:    Time of the day (h:m:s) when F.IT terminates old session and retrieves new one
    session_id:          If you starts F.IT when you're having an active Fortinet session, please paste that session id here. Otherwise, just let it empty by default
    
    * = required
  ```
- - Windows: Double click on `fit.exe` file to run.  
+ - **Windows:** Double click on `fit.exe` file to run.  
    *F.IT automatically runs in background so you won't see anything. You can check task manager for `fit.exe` process.*
- - Linux: 
+ - **Linux:** 
  ```
  $ cd /path/to/downloaded/binary
  $ chmod +x fit
  $ ./fit &
  ```
- *Note: You can pass configuration via console arguments instead of edit `fit.conf` file. See `./fit -- help` for more details.*  
+ *Note: You can pass configuration via console arguments instead of edit `fit.conf` file. See `--help` for more details.*  
  ```
- $ ./fit -d=true -https=true -ip=192.168.10.1:1003 -username=myaccount -password=mypassword -retries=10 -refresh=10800 -start=true -session=0f060b080b60789f &
+ $ ./fit -d=true -https=true -ip=192.168.10.1:1003 -username=myaccount -password=mypassword -retries=10 -refresh=10800 -start=true -termination=21:20:15 -session=0f060b080b60789f &
  ```  
  
 ## Build from source

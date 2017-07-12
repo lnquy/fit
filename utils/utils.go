@@ -7,11 +7,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	cfg "github.com/lnquy/fit/conf"
 	glb "github.com/lnquy/fit/modules/global"
 	"github.com/shirou/gopsutil/host"
 	"io"
 	"log"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -104,9 +106,36 @@ func decrypt(key []byte, cryptoText string) (string, error) {
 	return fmt.Sprintf("%s", cipherText), nil
 }
 
+func ExtractSessionIDFromUrls(urls []string) string {
+	for _, u := range urls {
+		if strings.Contains(u, cfg.Fit.Address) && strings.Contains(u, glb.F_ALIVE) {
+			return u[strings.Index(u, glb.F_ALIVE)+10:] // keepalive?session_id
+		}
+	}
+	return ""
+}
+
+func ParseTerminationTime(t string) (h, m, s int, err error) {
+	arrStr := strings.Split(t, ":")
+	if len(arrStr) != 3 {
+		return 4, 30, 0, errors.New("Invalid time") // global.DEFAULT_TERM_TIME
+	}
+	if h, err = strconv.Atoi(arrStr[0]); err != nil {
+		return 4, 30, 0, err
+	}
+	if m, err = strconv.Atoi(arrStr[1]); err != nil {
+		return 4, 30, 0, err
+	}
+	if s, err = strconv.Atoi(arrStr[2]); err != nil {
+		return 4, 30, 0, err
+	}
+	return
+}
+
 func GetTerminationTicker() *time.Ticker {
 	now := time.Now()
-	nextTick := time.Date(now.Year(), now.Month(), now.Day(), glb.TERM_HOUR, glb.TERM_MIN, glb.TERM_SEC, 0, time.Local)
+	h, m, s, _ := ParseTerminationTime(cfg.Fit.TerminationTime)
+	nextTick := time.Date(now.Year(), now.Month(), now.Day(), h, m, s, 0, time.Local)
 	if !nextTick.After(now) {
 		nextTick = nextTick.Add(time.Hour * 24)
 	}

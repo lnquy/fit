@@ -31,6 +31,7 @@ var (
 	fMaxRetries   *int
 	fRefreshTime  *int
 	fStartup      *bool
+	fTermTime     *string
 	fSessionId    *string
 
 	client  *http.Client
@@ -48,6 +49,7 @@ func init() {
 	fMaxRetries = flag.Int("retries", glb.DEFAULT_MAX_RETRIES, "Maximum retry times before terminating old session")
 	fRefreshTime = flag.Int("refresh", glb.DEFAULT_REFRESH_TIME, "Time to wait until check and refresh Fortigate session in second")
 	fStartup = flag.Bool("start", false, "Allow F.IT automatically run when your computer started up?")
+	fTermTime = flag.String("termination", glb.DEFAULT_TERM_TIME, "Time of the day (h:m:s) when F.IT terminates old session and retrieves new one")
 	fSessionId = flag.String("session", "", "Your current Fortinet session ID")
 
 	client = &http.Client{
@@ -89,6 +91,13 @@ func configure() {
 	}
 	if *fStartup {
 		cfg.Fit.AutoStartup = *fStartup
+	}
+	if *fTermTime != glb.DEFAULT_TERM_TIME {
+		if _, _, _, err := utils.ParseTerminationTime(*fTermTime); err != nil {
+			cfg.Fit.TerminationTime = glb.DEFAULT_TERM_TIME
+		} else {
+			cfg.Fit.TerminationTime = *fTermTime
+		}
 	}
 	if *fSessionId != "" {
 		cfg.Fit.SessionID = *fSessionId
@@ -139,6 +148,8 @@ func configure() {
 	} else {
 		boot.DisableAutoStartup()
 	}
+
+	cfg.WriteToFile()
 }
 
 func getSessionID() (sId string, ok bool) {
@@ -167,7 +178,7 @@ func getSessionID() (sId string, ok bool) {
 
 func authenticate(id string) (aId string) {
 	for i := 0; i < cfg.Fit.MaxRetries; i++ {
-		if aId = authenticateRequest(id); aId != "" {
+		if aId = authRequest(id); aId != "" {
 			return
 		}
 		log.Printf("Authenticate failed. Retrying in %v seconds...", glb.WAIT_TIME)
@@ -176,7 +187,7 @@ func authenticate(id string) (aId string) {
 	return
 }
 
-func authenticateRequest(id string) (res string) {
+func authRequest(id string) (res string) {
 	var req *http.Request
 	var err error
 	authUrl := utils.GetFortinetURL(cfg.Fit.IsHTTPS, cfg.Fit.Address, glb.F_AUTH, id)
@@ -203,21 +214,12 @@ func authenticateRequest(id string) (res string) {
 			if strings.Index(string(body), "/keepalive?") != -1 {
 				if urls := xurls.Strict.FindAllString(string(body), -1); urls != nil {
 					//log.Printf("%v", urls)
-					return extractSessionIDFromUrls(urls)
+					return utils.ExtractSessionIDFromUrls(urls)
 				}
 			}
 		}
 	}
 	return
-}
-
-func extractSessionIDFromUrls(urls []string) string {
-	for _, u := range urls {
-		if strings.Contains(u, cfg.Fit.Address) && strings.Contains(u, glb.F_ALIVE) {
-			return u[strings.Index(u, glb.F_ALIVE)+10:] // keepalive?session_id
-		}
-	}
-	return ""
 }
 
 func keepAlive(retChan chan bool) {
@@ -270,8 +272,8 @@ func fit() bool {
 		time.Sleep(time.Second * time.Duration(glb.WAIT_TIME)) // Wait HTTP client to release transaction
 		if cfg.Fit.SessionID = authenticate(cfg.Fit.SessionID); cfg.Fit.SessionID != "" {
 			log.Printf("Authenticated. Current session ID: %s", cfg.Fit.SessionID)
-			cfg.WriteToFile()
 			log.Printf("Welcome to the Internet. Your session will be refreshed automatically in %d seconds", cfg.Fit.RefreshTime)
+			cfg.WriteToFile()
 
 			kaChan := make(chan bool, 1)
 			go keepAlive(kaChan)
