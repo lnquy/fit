@@ -47,8 +47,8 @@ func init() {
 	fPassword = flag.String("password", "", "Your password")
 	fMaxRetries = flag.Int("retries", glb.DEFAULT_MAX_RETRIES, "Maximum retry times before terminating old session")
 	fRefreshTime = flag.Int("refresh", glb.DEFAULT_REFRESH_TIME, "Time to wait until check and refresh Fortigate session in second")
-	fStartup = flag.Bool("auto-start", false, "Allow F.IT automatically run when your computer started up?")
-	fSessionId = flag.String("session-id", "", "Your current Fortinet session ID")
+	fStartup = flag.Bool("start", false, "Allow F.IT automatically run when your computer started up?")
+	fSessionId = flag.String("session", "", "Your current Fortinet session ID")
 
 	client = &http.Client{
 		Timeout: time.Duration(glb.DEFAULT_REQ_TIMEOUT) * time.Second,

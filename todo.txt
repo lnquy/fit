@@ -1,9 +1,0 @@
-TODOS
-=====
-
-1. Never end program
-    - If cannot detect session ID, authenticate or keep alive then wait and retry
-2. Server GUI app
-3. Retry when failing keep alive.
-	- If cannot keep alive -> Logout and reauthenticate.
-4. Add option to read specific configuration file [?]
