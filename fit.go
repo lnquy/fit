@@ -50,7 +50,7 @@ func init() {
 	fRefreshTime = flag.Int("refresh", glb.DEFAULT_REFRESH_TIME, "Time to wait until check and refresh Fortigate session in second")
 	fStartup = flag.Bool("start", false, "Allow F.IT automatically run when your computer started up?")
 	fTermTime = flag.String("termination", glb.DEFAULT_TERM_TIME, "Time of the day (h:m:s) when F.IT terminates old session and retrieves new one")
-	fSessionId = flag.String("session", "", "Your current Fortinet session ID")
+	fSessionId = flag.String("session", "", "Your current Fortigate session ID")
 
 	client = &http.Client{
 		Timeout: time.Duration(glb.DEFAULT_REQ_TIMEOUT) * time.Second,
@@ -61,7 +61,7 @@ func init() {
 		},
 	}
 
-	exit = make(chan os.Signal)
+	exit = make(chan os.Signal, 1)
 	signal.Notify(exit, syscall.SIGTERM, syscall.SIGINT)
 }
 
@@ -117,13 +117,14 @@ func configure() {
 	if *fDebug {
 		mw = io.MultiWriter(os.Stdout, logFile)
 		log.SetOutput(mw)
+		log.Println("Debugging on. Write log to both log/fit.log file and stdout")
 	} else {
 		log.SetOutput(logFile)
 	}
 
 	// Validate required fields
 	if cfg.Fit.Address == "" || cfg.Fit.Username == "" || cfg.Fit.Password == "" {
-		log.Print("Fortinet server address, username and password must be specified via configuration file or CLI arguments. Exiting...")
+		log.Print("Fortigate server address, username and password must be specified via configuration file or CLI arguments. Exiting...")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -244,12 +245,16 @@ func keepAlive(retChan chan bool) {
 			if !ok {
 				log.Printf("Failed to refresh session %s", cfg.Fit.SessionID)
 				refTicker.Stop()
+				termTicker.Stop()
 				retChan <- true // Try to terminate old session and handle new one
+				return
 			}
 		case t := <-termTicker.C:
 			log.Printf("Terminate session tick at: %v", t)
 			refTicker.Stop()
+			termTicker.Stop()
 			retChan <- true
+			return
 		}
 	}
 }
@@ -257,7 +262,7 @@ func keepAlive(retChan chan bool) {
 func logout() error {
 	resp, err := client.Get(utils.GetFortinetURL(cfg.Fit.IsHTTPS, cfg.Fit.Address, glb.F_LOGOUT, cfg.Fit.SessionID))
 	if err == nil {
-		log.Printf("Terminated your Fortinet session (%v)", cfg.Fit.SessionID)
+		log.Printf("Terminated your Fortigate session (%v)", cfg.Fit.SessionID)
 		cfg.Fit.SessionID = ""
 	}
 	defer resp.Body.Close()
@@ -267,7 +272,7 @@ func logout() error {
 func fit() bool {
 	var ok bool
 	if cfg.Fit.SessionID, ok = getSessionID(); ok {
-		log.Printf("Fortinet session ID detected: %s", cfg.Fit.SessionID)
+		log.Printf("Fortigate session ID detected: %s", cfg.Fit.SessionID)
 		log.Println("Authenticating...")
 		time.Sleep(time.Second * time.Duration(glb.WAIT_TIME)) // Wait HTTP client to release transaction
 		if cfg.Fit.SessionID = authenticate(cfg.Fit.SessionID); cfg.Fit.SessionID != "" {
@@ -279,7 +284,7 @@ func fit() bool {
 			go keepAlive(kaChan)
 			return <-kaChan
 		} else {
-			log.Println("Failed to authenticate. Please check the Fortinet address and your username/password then try again")
+			log.Println("Failed to authenticate. Please check the Fortigate address and your username/password then try again")
 			return false
 		}
 	} else {
@@ -293,18 +298,19 @@ func main() {
 
 	go func() { // Graceful exit
 		<-exit
-		log.Println("Have a good day. Bye mate!")
+		log.Println("Graceful exiting. Have a good day. Bye mate!")
+		logFile.Close()
 		os.Exit(0)
 	}()
 
 	for {
+		log.Printf("Dropping old session (%v) to handle new one", cfg.Fit.SessionID)
 		if cfg.Fit.SessionID != "" { // Terminate old session to handle new one
 			logout()
 		}
 		if !fit() {
 			break
 		}
-		log.Printf("Dropping old session (%v) to handle new one", cfg.Fit.SessionID)
 	}
 
 	log.Println("Have a good day. Bye mate!")
